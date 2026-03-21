@@ -107,7 +107,6 @@ Key settings during setup:
 - **Network:** configure `eth0` (Wired) as primary with static IP
 - **DNS:** `8.8.8.8` (temporary, Pi-hole will replace this)
 - **Timezone:** `Region/City`
-- **NTP:** `chrony`
 - **Disk:** `mmcblk0`, use `sys` mode
 
 Example static IP config:
