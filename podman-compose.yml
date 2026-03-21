@@ -4,7 +4,7 @@ services:
     container_name: pihole
     network_mode: host
     environment:
-      - TZ=Europe/Warsaw
+      - TZ=Region/City
       - WEBPASSWORD=<YOUR_PIHOLE_PASSWORD>
       - PIHOLE_DNS_=8.8.8.8;8.8.4.4
     volumes:
@@ -77,7 +77,7 @@ services:
     container_name: watchtower
     network_mode: host
     environment:
-      - TZ=Europe/Warsaw
+      - TZ=Region/City
       - WATCHTOWER_SCHEDULE=0 0 3 * * 0
       - WATCHTOWER_CLEANUP=true
     volumes:
