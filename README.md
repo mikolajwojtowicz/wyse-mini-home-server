@@ -1,6 +1,23 @@
-# Dell Wyse 3040 — Mini Home Server
+# Dell Wyse 3040 — Optimized High-Performance Home Server
 
-Complete guide to turning a $20 thin client into a full home server with DNS adblocking, monitoring dashboard, speedtests, and remote access.
+Complete guide to turning a resource-constrained $20 thin client into a professional home server environment with DNS adblocking, unified monitoring, automated testing, and secure remote access.
+
+### **Project Overview**
+This project demonstrates a production-grade, containerized architecture deployed on a **Dell Wyse 3040**. The core challenge was to transform a low-power Intel Atom device (4 cores, 2GB RAM / 8GB eMMC) into a reliable, multi-service node handling network-wide ad-blocking (Pi-hole), service monitoring, and automated performance testing.
+
+#### **Key Features**
+*   **Resource Optimization:** Designed a lean environment using **Alpine Linux** and **Podman** (daemonless) to run 6+ concurrent services while maintaining a memory footprint under **30% (approx. 600MB/2GB)**.
+*   **Storage Management:** Implemented custom **log rotation logic** and **automated disk-space guards** (Python/Shell) to ensure stability on the hardware-limited 8GB eMMC storage.
+*   **Network Performance:** Engineered a custom, multi-threaded **Speedtest-CLI** integration to maximize Gigabit Ethernet throughput, overcoming the typical single-thread bottlenecks of low-power Atom CPUs.
+*   **Self-Healing Architecture:** Persistence via OpenRC and Watchtower, ensuring zero-touch recovery and automated image updates.
+
+#### **Tech Stack**
+*   **Infrastructure:** Alpine Linux, Podman, Tailscale VPN.
+*   **Ad-blocking & DNS:** Pi-hole (with optimized monthly query database limits).
+*   **Monitoring:** Beszel (Lightweight Agency), Uptime Kuma (Uptime/Alerts), Glance (Unified UI dashboard).
+*   **Automation:** Python/Bash (Custom metrics & API triggers), Watchtower (Auto-updates).
+
+---
 
 ## Hardware
 
@@ -85,7 +102,7 @@ setup-alpine
 ```
 
 Key settings during setup:
-- **Keyboard:** `pl` (or your layout)
+- **Keyboard:** `us` (or your layout)
 - **Hostname:** `wyse`
 - **Network:** configure `eth0` or `mlan0` (WiFi) with static IP
 - **DNS:** `8.8.8.8` (temporary, Pi-hole will replace this)
