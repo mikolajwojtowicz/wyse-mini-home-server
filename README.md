@@ -233,6 +233,7 @@ Instead of running each service manually, we use **Compose** to orchestrate the 
 All services (Pi-hole, Uptime Kuma, Beszel, Glance, Watchtower) are defined in the `podman-compose.yml` file included in this repository.
 
 > **Important:** Open `podman-compose.yml` and replace the following placeholders with your own values:
+> - `Region/City`
 > - `<YOUR_PIHOLE_PASSWORD>`
 > - `<YOUR_BESZEL_AGENT_KEY>` (Get this from the Beszel Hub UI)
 
