@@ -1,0 +1,93 @@
+services:
+  pihole:
+    image: docker.io/pihole/pihole:latest
+    container_name: pihole
+    network_mode: host
+    environment:
+      - TZ=Europe/Warsaw
+      - WEBPASSWORD=<YOUR_PIHOLE_PASSWORD>
+      - PIHOLE_DNS_=8.8.8.8;8.8.4.4
+    volumes:
+      - /server/pihole/etc-pihole:/etc/pihole
+      - /server/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: docker.io/louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    ports:
+      - "3001:3001"
+    volumes:
+      - /server/uptime-kuma/data:/app/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+  beszel:
+    image: docker.io/henrygd/beszel:latest
+    container_name: beszel
+    ports:
+      - "8090:8090"
+    volumes:
+      - beszel_data:/grad-data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+  beszel-agent:
+    image: docker.io/henrygd/beszel-agent:latest
+    container_name: beszel-agent
+    ports:
+      - "45876:45876"
+    environment:
+      - PORT=45876
+      - KEY=<YOUR_BESZEL_AGENT_KEY>
+    volumes:
+      - /var/run/podman/podman.sock:/var/run/docker.sock:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+  glance:
+    image: docker.io/glanceapp/glance:latest
+    container_name: glance
+    ports:
+      - "8080:8080"
+    volumes:
+      - /server/glance/glance.yml:/app/config.yml:ro
+      - /server/glance/assets:/app/assets:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+  watchtower:
+    image: docker.io/containrrr/watchtower:latest
+    container_name: watchtower
+    network_mode: host
+    environment:
+      - TZ=Europe/Warsaw
+      - WATCHTOWER_SCHEDULE=0 0 3 * * 0
+      - WATCHTOWER_CLEANUP=true
+    volumes:
+      - /var/run/podman/podman.sock:/var/run/docker.sock
+    command: uptime-kuma glance beszel beszel-agent
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+    restart: unless-stopped
+
+volumes:
+  beszel_data:
