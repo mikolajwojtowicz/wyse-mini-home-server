@@ -1,0 +1,177 @@
+theme:
+  background-color: 240 5 9
+  primary-color: 217 80 58
+  positive-color: 158 60 45
+  negative-color: 0 70 55
+
+server:
+  assets-path: /app/assets
+
+pages:
+  - name: Wyse 3040
+    columns:
+      - size: small
+        widgets:
+          - type: clock
+            hour-format: 24h
+            timezones:
+              - timezone: Europe/Warsaw
+                label: Warszawa
+
+          - type: server-stats
+            servers:
+              - type: local
+                name: Wyse 3040
+
+          - type: monitor
+            cache: 1m
+            title: Services
+            sites:
+              - title: Pi-hole
+                url: https://<SERVER_IP>/admin
+                icon: si:pihole
+                allow-insecure: true
+              - title: Uptime Kuma
+                url: http://<SERVER_IP>:3001
+                icon: si:uptimekuma
+              - title: Beszel
+                url: http://<SERVER_IP>:8090/system/< Beszel Agent Token >
+                icon: si:statuspage
+              - title: Google
+                url: https://google.com
+                icon: si:google
+
+      - size: full
+        widgets:
+          - type: dns-stats
+            service: pihole-v6
+            url: https://127.0.0.1
+            allow-insecure: true
+            password: <YOUR_PIHOLE_PASSWORD>
+
+          - type: custom-api
+            title: Speedtest
+            cache: 30s
+            url: http://localhost:8080/assets/speedtest.json
+            template: |
+              <div style="text-align: right; margin-bottom: 4px; font-size: 0.85em; opacity: 0.9;">
+                <a href="http://<SERVER_IP>:8902/" style="color: hsl(217,50%,55%); text-decoration:none; font-weight:bold;">&#9654; Run test</a>
+              </div>
+              <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+                M-AVG <small style="opacity:0.6">(30 days)</small>: 
+                <strong class="color-positive" style="margin-left: 6px;">{{ if ne (.JSON.String "avg_dl") "" }}{{ .JSON.String "avg_dl" }}{{ else }}-{{ end }}</strong> DL | 
+                <strong style="color: hsl(280, 65%, 70%);">{{ if ne (.JSON.String "avg_ul") "" }}{{ .JSON.String "avg_ul" }}{{ else }}-{{ end }}</strong> UL | 
+                <strong>{{ if ne (.JSON.String "avg_ping") "" }}{{ .JSON.String "avg_ping" }}{{ else }}-{{ end }}</strong> ms
+              </div>
+              {{ if .JSON.Exists "entries" }}
+                {{ $entries := .JSON.Array "entries" }}
+                {{ $total := len $entries }}
+                {{ if eq $total 0 }}
+                  <p class="color-subtext">No speedtest data yet</p>
+                {{ else }}
+                  <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:0.95em;">
+                    <colgroup>
+                      <col style="width:16%;">
+                      <col style="width:16%;">
+                      <col style="width:16%;">
+                      <col style="width:16%;">
+                      <col style="width:36%;">
+                    </colgroup>
+                    <thead>
+                      <tr style="border-bottom: 1px solid rgba(255,255,255,0.15);">
+                        <th style="text-align:left; padding:8px 6px; font-weight:600;">Time</th>
+                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Download</th>
+                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Upload</th>
+                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Ping</th>
+                        <th style="text-align:left; padding:8px 6px; font-weight:600; padding-left:14px;">Server</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {{ range $i, $e := $entries }}
+                        {{ if lt $i 10 }}
+                          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                            <td style="padding:5px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;" class="color-subtext">{{ $e.String "time" }}</td>
+                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                              {{ if eq ($e.String "download") "" }}
+                                <span class="color-negative">ERROR</span>
+                              {{ else }}
+                                <span class="color-positive">{{ $e.String "download" }} <small style="opacity:0.6">Mb</small></span>
+                              {{ end }}
+                            </td>
+                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                              {{ if eq ($e.String "upload") "" }}
+                                <span class="color-negative">ERROR</span>
+                              {{ else }}
+                                <span style="color: hsl(280, 65%, 70%);">{{ $e.String "upload" }} <small style="opacity:0.6">Mb</small></span>
+                              {{ end Paradise }}
+                            </td>
+                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                              {{ if eq ($e.String "ping") "" }}
+                                <span class="color-negative">ERROR</span>
+                              {{ else }}
+                                {{ $e.String "ping" }} <small style="opacity:0.6">ms</small>
+                              {{ end }}
+                            </td>
+                            <td style="padding:5px 6px; padding-left:14px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
+                              {{ if ne ($e.String "server") "" }}
+                                <a href="{{ $e.String "url" }}" target="_blank" style="color: inherit; text-decoration: underline; opacity: 0.8;">{{ $e.String "server" }}</a>
+                              {{ end }}
+                            </td>
+                          </tr>
+                        {{ end }}
+                      {{ end }}
+                    </tbody>
+                  </table>
+                  {{ if gt $total 10 }}
+                    <details style="margin-top:6px;">
+                      <summary style="cursor:pointer; color:hsl(217,50%,55%); font-size:0.85em; list-style:none; padding:4px 6px;">&#9660; show all</summary>
+                      <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin-top:4px; font-size:0.95em;">
+                        <colgroup>
+                          <col style="width:16%;">
+                          <col style="width:16%;">
+                          <col style="width:16%;">
+                          <col style="width:16%;">
+                          <col style="width:36%;">
+                        </colgroup>
+                        <tbody>
+                          {{ range $i, $e := $entries }}
+                            {{ if ge $i 10 }}
+                              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:5px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;" class="color-subtext">{{ $e.String "time" }}</td>
+                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                                  {{ if eq ($e.String "download") "" }}
+                                    <span class="color-negative">ERROR</span>
+                                  {{ else }}
+                                    <span class="color-positive">{{ $e.String "download" }} <small style="opacity:0.6">Mb</small></span>
+                                  {{ end }}
+                                </td>
+                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                                  {{ if eq ($e.String "upload") "" }}
+                                    <span class="color-negative">ERROR</span>
+                                  {{ else }}
+                                    <span style="color: hsl(280, 65%, 70%);">{{ $e.String "upload" }} <small style="opacity:0.6">Mb</small></span>
+                                  {{ end }}
+                                </td>
+                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
+                                  {{ if eq ($e.String "ping") "" }}
+                                    <span class="color-negative">ERROR</span>
+                                  {{ else }}
+                                    {{ $e.String "ping" }} <small style="opacity:0.6">ms</small>
+                                  {{ end }}
+                                </td>
+                                <td style="padding:5px 6px; padding-left:14px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
+                                  {{ if ne ($e.String "server") "" }}
+                                    <a href="{{ $e.String "url" }}" target="_blank" style="color: inherit; text-decoration: underline; opacity: 0.8;">{{ $e.String "server" }}</a>
+                                  {{ end }}
+                                </td>
+                              </tr>
+                            {{ end }}
+                          {{ end }}
+                        </tbody>
+                      </table>
+                    </details>
+                  {{ end }}
+                {{ end }}
+              {{ else }}
+                <p class="color-subtext">Waiting for speedtest data...</p>
+              {{ end }}
