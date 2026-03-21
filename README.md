@@ -104,17 +104,19 @@ setup-alpine
 Key settings during setup:
 - **Keyboard:** `us` (or your layout)
 - **Hostname:** `wyse`
-- **Network:** configure `eth0` or `mlan0` (WiFi) with static IP
+- **Network:** configure `eth0` (Wired) as primary with static IP
 - **DNS:** `8.8.8.8` (temporary, Pi-hole will replace this)
 - **Timezone:** `Europe/Warsaw`
 - **Disk:** `mmcblk0`, use `sys` mode
 
 Example static IP config:
 ```
-Interface: eth0 (or mlan0 for WiFi)
+Interface: eth0 (Primary)
 IP: <SERVER_IP>/24
 Gateway: <GATEWAY_IP>
 ```
+
+> **Note:** WiFi (`mlan0`) is added later as a secondary fallback (see the Dual Network section).
 
 Reboot after install, remove USB.
 
@@ -134,7 +136,6 @@ cat >> /etc/apk/repositories << 'EOF'
 http://dl-cdn.alpinelinux.org/alpine/edge/main
 http://dl-cdn.alpinelinux.org/alpine/edge/community
 EOF
-apk update
 ```
 
 ## 4. System Update
@@ -142,16 +143,32 @@ apk update
 Upgrade all base packages to the latest versions from the new repositories:
 
 ```sh
+apk update
 apk upgrade
 ```
 
 ## 5. Install Packages
 
 ```sh
-apk add podman fuse-overlayfs slirp4netns python3 bash curl tailscale
+apk add podman podman-compose fuse-overlayfs slirp4netns python3 bash curl git nano openssh
 ```
 
-## 6. Enable Core Services
+## 6. Install Speedtest-Ookla CLI
+
+The official binary provides multi-threaded performance (crucial for 1Gbps tests on weak CPUs). Download, extract, and move it to the expected path:
+
+```sh
+# Download official x86_64 binary
+curl -L https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -o speedtest.tgz
+
+# Extract and install
+tar -xzf speedtest.tgz
+mv speedtest /usr/local/bin/speedtest-ookla
+chmod +x /usr/local/bin/speedtest-ookla
+rm speedtest.tgz speedtest.md speedtest.5
+```
+
+## 7. Enable Core Services
 
 ```sh
 # cgroups — required for containers
@@ -172,7 +189,7 @@ rc-update add sshd default
 rc-update add crond default
 ```
 
-## 7. Allow DNS Port
+## 8. Allow DNS Port
 
 Pi-hole needs port 53, which normally requires root privileges:
 
@@ -181,7 +198,7 @@ echo "net.ipv4.ip_unprivileged_port_start=53" >> /etc/sysctl.conf
 sysctl -p
 ```
 
-## 8. Connect Tailscale
+## 9. Connect Tailscale
 
 ```sh
 tailscale up
@@ -197,7 +214,7 @@ tailscale status
 
 # Container Setup
 
-## 9. Prepare Directories
+## 10. Prepare Directories
 
 ```sh
 mkdir -p /server/pihole/etc-pihole
@@ -207,136 +224,24 @@ mkdir -p /server/glance/assets
 mkdir -p /server/speedtest/logs
 ```
 
-## 10. Pull Container Images
+## 11. Deploy Services with Compose
+
+Instead of running each service manually, we use **Compose** to orchestrate the entire stack. This ensures all volumes, environmental variables, and log limits are applied consistently.
+
+### The `podman-compose.yml`
+
+All services (Pi-hole, Uptime Kuma, Beszel, Glance, Watchtower) are defined in the `podman-compose.yml` file included in this repository.
+
+> **Important:** Open `podman-compose.yml` and replace the following placeholders with your own values:
+> - `<YOUR_PIHOLE_PASSWORD>`
+> - `<YOUR_BESZEL_AGENT_KEY>` (Get this from the Beszel Hub UI)
+
+### Start the environment:
 
 ```sh
-podman pull docker.io/pihole/pihole:latest
-podman pull docker.io/louislam/uptime-kuma:latest
-podman pull docker.io/henrygd/beszel:latest
-podman pull docker.io/henrygd/beszel-agent:latest
-podman pull docker.io/glanceapp/glance:latest
-podman pull docker.io/containrrr/watchtower:latest
+# Ensure you are in the directory containing podman-compose.yml
+podman-compose up -d
 ```
-
-## 11. Create Containers
-
-All containers use `--network host` (share the host's network stack) and `--log-opt max-size=1m` (prevent log files from filling the tiny 8 GB eMMC).
-
-### Pi-hole — DNS + Ad Blocking
-
-Blocks ads and trackers at DNS level for every device on your network.
-
-```sh
-podman run -d --name pihole --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -e TZ=Europe/Warsaw \
-  -e WEBPASSWORD=pihole \
-  -e DNSMASQ_USER=pihole \
-  -e FT_DNS_PERMIT_ALL=true \
-  -v /server/pihole/etc-pihole:/etc/pihole \
-  -v /server/pihole/etc-dnsmasq.d:/etc/dnsmasq.d \
-  docker.io/pihole/pihole:latest
-```
-
-After startup, go to `https://<IP>/admin` and log in with password `pihole`.
-
-Then point your router's DNS to this server's IP so all devices use Pi-hole.
-
-### Pi-hole Blocklists
-
-Add [Hagezi](https://github.com/hagezi/dns-blocklists) blocklists for comprehensive ad/tracker/threat blocking. Go to Pi-hole Admin → Adlists and add:
-
-| List | URL | Domains |
-|---|---|---|
-| **Hagezi Multi Pro** | `https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/hosts/pro.txt` | ~383K |
-| **Hagezi TIF (threats)** | `https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/hosts/tif.txt` | ~782K |
-
-Then update gravity:
-
-```sh
-podman exec pihole pihole -g
-```
-
-This brings total blocked domains from ~82K (default StevenBlack list) to ~1.25M.
-
-### Uptime Kuma — Service Monitoring
-
-Web-based uptime monitor. Set up checks for any URL/port and get notified when something goes down.
-
-```sh
-podman run -d --name uptime-kuma --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  --cap-add=NET_RAW \
-  -e TZ=Europe/Warsaw \
-  -v /server/uptime-kuma/data:/app/data \
-  docker.io/louislam/uptime-kuma:latest
-```
-
-`--cap-add=NET_RAW` is required for Uptime Kuma's ping monitors to work.
-
-First visit to `:3001` will prompt you to create an admin account.
-
-### Beszel — System Monitoring
-
-Lightweight server monitoring with a web UI showing CPU, RAM, disk, network, and container stats. Consists of a **hub** (web UI) and a **local agent**.
-
-#### Beszel Hub
-
-```sh
-podman run -d --name beszel --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -e TZ=Europe/Warsaw \
-  -e APP_URL=http://localhost:8090 \
-  -v beszel_data:/beszel_data \
-  docker.io/henrygd/beszel:latest \
-  serve --http=0.0.0.0:8090
-```
-
-First visit to `:8090` will prompt you to create an admin account. After logging in, add a system and copy the SSH key shown — you'll need it for the agent.
-
-#### Beszel Agent
-
-```sh
-podman run -d --name beszel-agent --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -e TZ=Europe/Warsaw \
-  -e HUB_URL=http://localhost:8090 \
-  -e LISTEN=45876 \
-  -e KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZBMRHRB+Xqqy06dNXM2zO/4CAFpV28O2bc2RZTDznO" \
-  -v /var/run/podman/podman.sock:/var/run/docker.sock \
-  docker.io/henrygd/beszel-agent:latest
-```
-
-Replace the `KEY` value with the SSH public key shown in your Beszel hub when adding a system.
-
-### Glance — Unified Dashboard
-
-Single-page dashboard that ties everything together: clock, service status monitors, DNS stats from Pi-hole, server stats, and speedtest results table.
-
-```sh
-podman run -d --name glance --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -v /server/glance/assets:/app/assets:ro \
-  -v /server/glance/glance.yml:/app/config/glance.yml:ro \
-  docker.io/glanceapp/glance:latest
-```
-
-### Watchtower — Automatic Container Updates
-
-Automatically checks for and applies container image updates every **Sunday at 3:00 AM**. Cleans up old images after updating.
-
-```sh
-podman run -d --name watchtower --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -e TZ=Europe/Warsaw \
-  -e WATCHTOWER_SCHEDULE="0 0 3 * * 0" \
-  -e WATCHTOWER_CLEANUP=true \
-  -v /var/run/podman/podman.sock:/var/run/docker.sock \
-  docker.io/containrrr/watchtower:latest \
-  uptime-kuma glance beszel beszel-agent
-```
-
-> **Note:** Only the listed containers are watched. Pi-hole and Glance dashboard config container are excluded to avoid unexpected config resets. Speedtest-trigger runs as a host service (not a container).
 
 ## 12. Verify Containers
 
@@ -344,26 +249,20 @@ podman run -d --name watchtower --network host --restart unless-stopped \
 podman ps
 ```
 
-You should see all containers running:
-
-```
-pihole        Up ...
-uptime-kuma   Up ...
-beszel        Up ...
-beszel-agent  Up ...
-glance        Up ...
-watchtower    Up ...
-```
+You should see all containers (pihole, uptime-kuma, beszel, beszel-agent, glance, watchtower) running. If any service failed to start, check the logs: `podman logs [container_name]`.
 
 ---
+
 
 # Speedtest Setup
 
 Automated internet speed tests (download, upload, ping) every 30 minutes, with a manual trigger button on the dashboard.
 
-## 13. Speedtest Script
+## 13. Speedtest Backend
 
-Create `/server/speedtest/run.sh`:
+The speedtest engine uses the official Ookla CLI for accuracy and keeps a 30-day history with monthly averages.
+
+### Create `/server/speedtest/run.sh`:
 
 ```sh
 cat > /server/speedtest/run.sh << 'SCRIPT'
@@ -499,7 +398,7 @@ class ReuseServer(http.server.HTTPServer):
 
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        host = self.headers.get("Host", "192.168.0.30:8902").split(":")[0]
+        host = self.headers.get("Host", "localhost:8902").split(":")[0]
         self.send_response(302)
         self.send_header("Location", "http://%s:8080/" % host)
         self.end_headers()
@@ -563,189 +462,16 @@ Add:
 
 ## 17. Glance Dashboard Config
 
-Create `/server/glance/glance.yml`:
+The dashboard layout, widgets (Pi-hole stats, Speedtest results, monitors), and theme are defined in the `glance.yml` file.
 
-```yaml
-theme:
-  background-color: 240 5 9
-  primary-color: 217 80 58
-  positive-color: 158 60 45
-  negative-color: 0 70 55
+### Setup:
+1. Copy the `glance.yml` from this repository to `/server/glance/glance.yml`.
+2. Replace the following placeholders with your actual values:
+   - `<SERVER_IP>`
+   - `<YOUR_PIHOLE_PASSWORD>`
+   - `<Beszel Agent Token>`
 
-server:
-  assets-path: /app/assets
-
-pages:
-  - name: Wyse 3040
-    columns:
-      - size: small
-        widgets:
-          - type: clock
-            hour-format: 24h
-            timezones:
-              - timezone: Europe/Warsaw
-                label: Warszawa
-
-          - type: server-stats
-            servers:
-              - type: local
-                name: Wyse 3040
-
-          - type: monitor
-            cache: 1m
-            title: Services
-            sites:
-              - title: Pi-hole
-                url: https://<SERVER_IP>/admin
-                icon: si:pihole
-                allow-insecure: true
-              - title: Uptime Kuma
-                url: http://<SERVER_IP>:3001
-                icon: si:uptimekuma
-              - title: Beszel
-                url: http://<SERVER_IP>:8090/system/< Beszel Agent Token >
-                icon: si:statuspage
-              - title: Google
-                url: https://google.com
-                icon: si:google
-
-      - size: full
-        widgets:
-          - type: dns-stats
-            service: pihole-v6
-            url: https://127.0.0.1
-            allow-insecure: true
-            password: <YOUR_PIHOLE_PASSWORD>
-
-          - type: custom-api
-            title: Speedtest
-            cache: 30s
-            url: http://localhost:8080/assets/speedtest.json
-            template: |
-              <div style="text-align: right; margin-bottom: 4px; font-size: 0.85em; opacity: 0.9;">
-                <a href="http://<SERVER_IP>:8902/" style="color: hsl(217,50%,55%); text-decoration:none; font-weight:bold;">&#9654; Run test</a>
-              </div>
-              <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
-                M-AVG <small style="opacity:0.6">(30 days)</small>: 
-                <strong class="color-positive" style="margin-left: 6px;">{{ if ne (.JSON.String "avg_dl") "" }}{{ .JSON.String "avg_dl" }}{{ else }}-{{ end }}</strong> DL | 
-                <strong style="color: hsl(280, 65%, 70%);">{{ if ne (.JSON.String "avg_ul") "" }}{{ .JSON.String "avg_ul" }}{{ else }}-{{ end }}</strong> UL | 
-                <strong>{{ if ne (.JSON.String "avg_ping") "" }}{{ .JSON.String "avg_ping" }}{{ else }}-{{ end }}</strong> ms
-              </div>
-              {{ if .JSON.Exists "entries" }}
-                {{ $entries := .JSON.Array "entries" }}
-                {{ $total := len $entries }}
-                {{ if eq $total 0 }}
-                  <p class="color-subtext">No speedtest data yet</p>
-                {{ else }}
-                  <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:0.95em;">
-                    <colgroup>
-                      <col style="width:16%;">
-                      <col style="width:16%;">
-                      <col style="width:16%;">
-                      <col style="width:16%;">
-                      <col style="width:36%;">
-                    </colgroup>
-                    <thead>
-                      <tr style="border-bottom: 1px solid rgba(255,255,255,0.15);">
-                        <th style="text-align:left; padding:8px 6px; font-weight:600;">Time</th>
-                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Download</th>
-                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Upload</th>
-                        <th style="text-align:right; padding:8px 6px; font-weight:600;">Ping</th>
-                        <th style="text-align:left; padding:8px 6px; font-weight:600; padding-left:14px;">Server</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {{ range $i, $e := $entries }}
-                        {{ if lt $i 10 }}
-                          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                            <td style="padding:5px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;" class="color-subtext">{{ $e.String "time" }}</td>
-                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                              {{ if eq ($e.String "download") "" }}
-                                <span class="color-negative">ERROR</span>
-                              {{ else }}
-                                <span class="color-positive">{{ $e.String "download" }} <small style="opacity:0.6">Mb</small></span>
-                              {{ end }}
-                            </td>
-                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                              {{ if eq ($e.String "upload") "" }}
-                                <span class="color-negative">ERROR</span>
-                              {{ else }}
-                                <span style="color: hsl(280, 65%, 70%);">{{ $e.String "upload" }} <small style="opacity:0.6">Mb</small></span>
-                              {{ end }}
-                            </td>
-                            <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                              {{ if eq ($e.String "ping") "" }}
-                                <span class="color-negative">ERROR</span>
-                              {{ else }}
-                                {{ $e.String "ping" }} <small style="opacity:0.6">ms</small>
-                              {{ end }}
-                            </td>
-                            <td style="padding:5px 6px; padding-left:14px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
-                              {{ if ne ($e.String "server") "" }}
-                                <a href="{{ $e.String "url" }}" target="_blank" style="color: inherit; text-decoration: underline; opacity: 0.8;">{{ $e.String "server" }}</a>
-                              {{ end }}
-                            </td>
-                          </tr>
-                        {{ end }}
-                      {{ end }}
-                    </tbody>
-                  </table>
-                  {{ if gt $total 10 }}
-                    <details style="margin-top:6px;">
-                      <summary style="cursor:pointer; color:hsl(217,50%,55%); font-size:0.85em; list-style:none; padding:4px 6px;">&#9660; show all</summary>
-                      <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin-top:4px; font-size:0.95em;">
-                        <colgroup>
-                          <col style="width:16%;">
-                          <col style="width:16%;">
-                          <col style="width:16%;">
-                          <col style="width:16%;">
-                          <col style="width:36%;">
-                        </colgroup>
-                        <tbody>
-                          {{ range $i, $e := $entries }}
-                            {{ if ge $i 10 }}
-                              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                <td style="padding:5px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;" class="color-subtext">{{ $e.String "time" }}</td>
-                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                                  {{ if eq ($e.String "download") "" }}
-                                    <span class="color-negative">ERROR</span>
-                                  {{ else }}
-                                    <span class="color-positive">{{ $e.String "download" }} <small style="opacity:0.6">Mb</small></span>
-                                  {{ end }}
-                                </td>
-                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                                  {{ if eq ($e.String "upload") "" }}
-                                    <span class="color-negative">ERROR</span>
-                                  {{ else }}
-                                    <span style="color: hsl(280, 65%, 70%);">{{ $e.String "upload" }} <small style="opacity:0.6">Mb</small></span>
-                                  {{ end }}
-                                </td>
-                                <td style="text-align:right; padding:5px 6px; overflow:hidden;">
-                                  {{ if eq ($e.String "ping") "" }}
-                                    <span class="color-negative">ERROR</span>
-                                  {{ else }}
-                                    {{ $e.String "ping" }} <small style="opacity:0.6">ms</small>
-                                  {{ end }}
-                                </td>
-                                <td style="padding:5px 6px; padding-left:14px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
-                                  {{ if ne ($e.String "server") "" }}
-                                    <a href="{{ $e.String "url" }}" target="_blank" style="color: inherit; text-decoration: underline; opacity: 0.8;">{{ $e.String "server" }}</a>
-                                  {{ end }}
-                                </td>
-                              </tr>
-                            {{ end }}
-                          {{ end }}
-                        </tbody>
-                      </table>
-                    </details>
-                  {{ end }}
-                {{ end }}
-              {{ else }}
-                <p class="color-subtext">Waiting for speedtest data...</p>
-              {{ end }}
-```
-
-> **Note:** Replace all occurrences of `192.168.0.30` with your server's IP address.
+> **Note:** Replace all occurrences of `<SERVER_IP>` (and `<VPN_IP>` for remote access) with your server's IP addresses.
 
 After creating/editing `glance.yml`, restart the container:
 
@@ -773,7 +499,7 @@ podman exec -it pihole ls -lh /etc/pihole/pihole-FTL.db
 
 # Boot & Autostart
 
-## 18. Container Boot Script
+## 19. Container Boot Script
 
 Create `/etc/local.d/containers.start`:
 
@@ -797,7 +523,7 @@ rc-update add local default
 
 Containers are created once (step 11) with `--restart unless-stopped`. On boot, the script just starts them — no need to recreate.
 
-## 19. Verify Boot Services
+## 20. Verify Boot Services
 
 ```sh
 rc-status
@@ -822,7 +548,7 @@ Expected services in `default` runlevel:
 
 The 8 GB eMMC has only ~5 GB usable, so storage management is critical.
 
-## 20. Container Log Limits
+## 21. Container Log Limits
 
 All containers are created with `--log-opt max-size=1m` (each log capped at 1 MB).
 
@@ -834,11 +560,11 @@ log_size_max = 1000000
 
 So any future containers will also have the 1 MB limit.
 
-## 21. Speedtest Data Retention
+## 22. Speedtest Data Retention
 
 `run.sh` keeps only the last 48 entries (~4 KB). It also skips the test entirely if disk usage exceeds 95%.
 
-## 22. Weekly Cleanup
+## 23. Weekly Cleanup
 
 A weekly cron job cleans up dangling container images and build cache:
 
@@ -864,7 +590,7 @@ Runs automatically every Saturday at 3:00 AM (via Alpine's default weekly cron).
 
 Replace the default Alpine welcome message with a dynamic status dashboard that shows system info, containers, and IPs on every SSH login.
 
-## 23. Create Dynamic MOTD
+## 24. Create Dynamic MOTD
 
 Create `/etc/profile.d/motd.sh`:
 
@@ -946,7 +672,7 @@ printf "\n"
 SCRIPT
 ```
 
-## 24. Disable Default MOTD
+## 25. Disable Default MOTD
 
 ```sh
 echo '' > /etc/motd
@@ -965,9 +691,9 @@ On every SSH login you'll now see:
   Memory     503 MB / 1885 MB (26%)     ← green/yellow/red
   Disk       4.2G / 5.0G (88%)          ← green/yellow/red
 
-  eth0       192.168.0.20
-  mlan0      192.168.0.30
-  tailscale  100.106.42.29
+  eth0       <SERVER_IP>
+  mlan0      <SERVER_IP_ALT>
+  tailscale  <VPN_IP>
 
   CONTAINERS
   ● pihole          Up 19 hours
@@ -977,7 +703,7 @@ On every SSH login you'll now see:
   ● glance          Up 12 hours
   ● watchtower      Up 12 hours
 
-  Dashboard  http://192.168.0.30:8080
+  Dashboard  http://<SERVER_IP>:8080
 ```
 
 ---
@@ -988,24 +714,24 @@ On every SSH login you'll now see:
 
 | Interface | IP | Purpose |
 |---|---|---|
-| `eth0` | 192.168.0.20 | Wired LAN |
-| `mlan0` | 192.168.0.30 | WiFi (primary) |
-| `tailscale0` | 100.106.42.29 | VPN (remote access) |
+| `eth0` | <SERVER_IP> | Wired LAN (primary)|
+| `mlan0` | <SERVER_IP_ALT> | WiFi |
+| `tailscale0` | <VPN_IP> | VPN (remote access) |
 
 ## Web Interfaces
 
 | Service | Local URL | Tailscale URL |
 |---|---|---|
-| **Glance Dashboard** | http://192.168.0.30:8080 | http://100.106.42.29:8080 |
-| **Pi-hole Admin** | http://192.168.0.30/admin | http://100.106.42.29/admin |
-| **Uptime Kuma** | http://192.168.0.30:3001 | http://100.106.42.29:3001 |
-| **Beszel** | http://192.168.0.30:8090 | http://100.106.42.29:8090 |
+| **Glance Dashboard** | http://<SERVER_IP>:8080 | http://<VPN_IP>:8080 |
+| **Pi-hole Admin** | http://<SERVER_IP>/admin | http://<VPN_IP>/admin |
+| **Uptime Kuma** | http://<SERVER_IP>:3001 | http://<VPN_IP>:3001 |
+| **Beszel** | http://<SERVER_IP>:8090 | http://<VPN_IP>:8090 |
 
 ## SSH
 
 ```sh
-ssh root@192.168.0.30       # local
-ssh root@100.106.42.29      # via Tailscale
+ssh root@<SERVER_IP>       # local
+ssh root@<VPN_IP>      # via Tailscale
 ```
 
 ---
@@ -1020,26 +746,12 @@ apk update && apk upgrade
 
 ## Update Containers
 
-Watchtower handles this automatically every Sunday at 3:00 AM. To update manually:
+Watchtower handles this automatically every Sunday at 3:00 AM. To update manually using Compose:
 
 ```sh
-podman pull docker.io/pihole/pihole:latest
-podman pull docker.io/louislam/uptime-kuma:latest
-podman pull docker.io/henrygd/beszel:latest
-podman pull docker.io/henrygd/beszel-agent:latest
-podman pull docker.io/glanceapp/glance:latest
-podman pull docker.io/containrrr/watchtower:latest
-
-# Recreate with same settings (example for beszel):
-podman stop beszel && podman rm beszel
-podman run -d --name beszel --network host --restart unless-stopped \
-  --log-opt max-size=1m \
-  -e TZ=Europe/Warsaw \
-  -e APP_URL=http://localhost:8090 \
-  -v beszel_data:/beszel_data \
-  docker.io/henrygd/beszel:latest \
-  serve --http=0.0.0.0:8090
-# Repeat for other containers...
+cd /server
+podman-compose pull
+podman-compose up -d
 ```
 
 ## Check Disk Usage
@@ -1078,14 +790,14 @@ If you use both ethernet (`eth0`) and WiFi (`mlan0`), you can make the server au
 ```sh
 auto eth0
 iface eth0 inet static
-        address <IP_ADDRESS_1>
+        address <SERVER_IP>
         netmask 255.255.255.0
         gateway <GATEWAY_IP>
         metric 10
 
 auto mlan0
 iface mlan0 inet static
-        address <IP_ADDRESS_2>
+        address <SERVER_IP_ALT>
         netmask 255.255.255.0
         gateway <GATEWAY_IP>
         metric 20
