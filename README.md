@@ -106,7 +106,7 @@ Key settings during setup:
 - **Hostname:** `wyse`
 - **Network:** configure `eth0` (Wired) as primary with static IP
 - **DNS:** `8.8.8.8` (temporary, Pi-hole will replace this)
-- **Timezone:** `Europe/Warsaw`
+- **Timezone:** `Region/City`
 - **Disk:** `mmcblk0`, use `sys` mode
 
 Example static IP config:
